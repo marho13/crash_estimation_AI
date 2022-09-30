@@ -7,11 +7,11 @@ from torch.optim import Adam
 #Hyperparameters
 state_dim = 6#speed, weight, frontLength, length, typeCar, index
 action_dim = 5
-lr = 0.00001
+lr = 0.00006
 k_epochs = 10
 batchSize = 1
 
-fileLocation = input("What is the file location")
+fileLocation = "Data/"#input("What is the file location")
 model = FCN(state_dim, action_dim, 128).float()
 loader = dataloader(fileLocation)
 lossFunc = MSELoss()
@@ -30,6 +30,13 @@ def trainBatch(X, Y):
     optim.step()
     return loss
 
+def testLoss(X, Y):
+    optim.zero_grad()
+    pred = model(X).float()
+    loss = lossFunc(pred, Y)
+    optim.zero_grad()
+    return loss
+
 def createBatch(i, speed, weights, l1, l2, car, data):
     Y = torch.tensor(data[i:i+batchSize], dtype=torch.float16).float()
     return torch.tensor([[speed, weights, l1, l2, car, i+x] for x in range(batchSize)], dtype=torch.float16).float(), Y
@@ -39,13 +46,14 @@ def trainEpoch(data):
     lossEpoch = 0.0
     for d in data:
         speed = float(d[1])/80.0
-        car = d[2]/3
+        car = d[2]
         weight, l1, l2 = carInfo[car]
+        car = car/3
         weight /= 2500.0
         l1 /= 1.75
         l2 /= 6.0
         for i in range(0, len(d[0])):
-            X = torch.tensor([speed, weight, l1, l2, car, i], dtype=torch.float16).float()
+            X = torch.tensor([speed, weight, l1, l2, car, (i/len(d[0]))], dtype=torch.float16).float()
             Y = torch.tensor(d[0][i]).float()
             #X, Y = createBatch(i, speed, weight, l1, l2, car, d[0])
             #print(X.shape, Y.shape)
@@ -58,15 +66,45 @@ def trainEpoch(data):
         divider += len(d[0])
     return lossEpoch/divider
 
-num_epochs = 10000
-minLoss = 999999.9
-data = [loader.makeData(f) for f in loader.files]
-tester = data[14]
-del data[14]
+def testEpoch(data):
+    lossEpoch = 0.0
+    for d in data:
+        speed = float(d[1])/80.0
+        car = d[2]
+        weight, l1, l2 = carInfo[car]
+        car = car/3
+        weight /= 2500.0
+        l1 /= 1.75
+        l2 /= 6.0
+        for i in range(0, len(d[0])):
+            X = torch.tensor([speed, weight, l1, l2, car, (i/len(d[0]))], dtype=torch.float16).float()
+            Y = torch.tensor(d[0][i]).float()
+            loss = testLoss(X, Y)
+            lossEpoch += loss
+
+
+    divider = 0
+    for d in data:
+        divider += len(d[0])
+    return lossEpoch/divider
+
+num_epochs = 1000
+minLoss = 10000.0
+minTLoss = 32000.0
+data = [loader.makeData(f) for files in loader.files for f in files]
+tester = [data[4], data[23], data[27], data[33]]
+
+del data[4]
+del data[23]
+del data[27]
+del data[33]
+
 for e in range(num_epochs):
     loss = trainEpoch(data)
-    if loss < minLoss:
+    tLoss = testEpoch(tester)
+    if tLoss < minTLoss:
         minLoss = loss
-        torch.save(model.state_dict(), "model_loss_{:.2f}.pkl".format(loss))
+        minTLoss = tLoss
+        torch.save(model.state_dict(), "lowest/model_loss_{:.5f}.pkl".format(tLoss))
         print("Saved")
-    print("Epoch {} gave a loss of {:.2f}".format(e, loss))
+    print("Epoch {} gave a training loss of {:.5f} and a testing loss of {}".format(e, loss, tLoss))
